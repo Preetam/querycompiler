@@ -11,11 +11,16 @@ type planNode struct {
 	table    *planNode
 	columns  []*planNode
 	filters  []*filterNode
+	group    *groupNode
 }
 
 type filterNode struct {
 	operator string
 	args     []*planNode
+}
+
+type groupNode struct {
+	args []*planNode
 }
 
 func (n *planNode) string(prefix string) string {
@@ -40,6 +45,10 @@ func (n *planNode) string(prefix string) string {
 		fmt.Fprintln(result, prefix+"Filter")
 		result.WriteString(filter.string(prefix + "\t"))
 	}
+	if n.group != nil {
+		fmt.Fprintln(result, prefix+"Group")
+		result.WriteString(n.group.string(prefix + "\t"))
+	}
 	return result.String()
 }
 
@@ -57,6 +66,22 @@ func (f *filterNode) eval(prefix string) {
 	fmt.Println(prefix+"Operator", f.operator)
 	for _, arg := range f.args {
 		fmt.Println(prefix + "Arg")
+		arg.readRow(prefix + "\t")
+	}
+}
+
+func (g *groupNode) string(prefix string) string {
+	result := &strings.Builder{}
+	for _, arg := range g.args {
+		fmt.Fprintln(result, prefix+"Group arg")
+		result.WriteString(arg.string(prefix + "\t"))
+	}
+	return result.String()
+}
+
+func (g *groupNode) eval(prefix string) {
+	for _, arg := range g.args {
+		fmt.Println(prefix + "Group arg")
 		arg.readRow(prefix + "\t")
 	}
 }
@@ -83,42 +108,58 @@ func compile(exp Expression) *planNode {
 		switch listExp[0] {
 		case Symbol("select"):
 			node := &planNode{}
-			columnsExp := listExp[1]
-			for _, columnExp := range columnsExp.(List) {
-				columnNode := compile(columnExp)
-				if columnNode != nil {
-					node.columns = append(node.columns, columnNode)
-				}
-			}
+			for _, nextExp := range listExp[1:] {
+				nextExpList := nextExp.(List)
+				switch nextExpList[0] {
+				case Symbol("columns"):
+					for _, columnExp := range nextExpList[1:] {
+						columnNode := compile(columnExp)
+						if columnNode != nil {
+							node.columns = append(node.columns, columnNode)
+						}
+					}
+				case Symbol("table"):
+					tableExp := nextExpList[1]
+					switch tableExp.(type) {
+					case Symbol:
+						node.table = &planNode{
+							symbol: string(tableExp.(Symbol)),
+						}
+					case List:
+						tableNode := compile(tableExp)
+						if tableNode != nil {
+							node.table = tableNode
+						}
+					}
+				case Symbol("where"):
+					for _, whereExp := range nextExpList[1:] {
+						whereExpList := whereExp.(List)
+						filter := &filterNode{
+							operator: string(whereExpList[0].(Symbol)),
+						}
+						for _, arg := range whereExpList[1:] {
+							argNode := compile(arg)
+							if argNode != nil {
+								filter.args = append(filter.args, argNode)
+							}
+						}
+						node.filters = append(node.filters, filter)
+					}
 
-			tableExp := listExp[2]
-			switch tableExp.(type) {
-			case Symbol:
-				node.table = &planNode{
-					symbol: string(tableExp.(Symbol)),
-				}
-			case List:
-				tableNode := compile(tableExp)
-				if tableNode != nil {
-					node.table = tableNode
-				}
-			}
-
-			whereExps := listExp[3].(List)
-			for _, whereExp := range whereExps {
-				whereExpList := whereExp.(List)
-				filter := &filterNode{
-					operator: string(whereExpList[0].(Symbol)),
-				}
-				for _, arg := range whereExpList[1:] {
-					argNode := compile(arg)
-					if argNode != nil {
-						filter.args = append(filter.args, argNode)
+				case Symbol("group"):
+					for _, groupExp := range nextExpList[1:] {
+						groupExpList := groupExp.(List)
+						group := &groupNode{}
+						for _, arg := range groupExpList {
+							argNode := compile(arg)
+							if argNode != nil {
+								group.args = append(group.args, argNode)
+							}
+						}
+						node.group = group
 					}
 				}
-				node.filters = append(node.filters, filter)
 			}
-
 			return node
 		}
 	}
@@ -135,10 +176,12 @@ func (n *planNode) readRow(prefix string) {
 		return
 	}
 	fmt.Println(prefix + "begin query")
-	if n.table.symbol != "" {
-		fmt.Println(prefix + "scan " + n.table.symbol)
-	} else {
-		n.table.readRow(prefix + "\t")
+	if n.table != nil {
+		if n.table.symbol != "" {
+			fmt.Println(prefix + "cursor read on table " + n.table.symbol)
+		} else {
+			n.table.readRow(prefix + "\t")
+		}
 	}
 	for _, filter := range n.filters {
 		filter.eval(prefix + "  filter: ")
@@ -153,6 +196,9 @@ func (n *planNode) readRow(prefix string) {
 			continue
 		}
 		col.readRow("column:" + prefix + " \t")
+	}
+	if n.group != nil {
+		n.group.eval(prefix + "  group: ")
 	}
 	fmt.Println(prefix + "emit row")
 }
