@@ -1,5 +1,19 @@
 package querycompiler
 
+// Copyright 2021 Preetam Jinka
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 import (
 	"errors"
 	"regexp"
@@ -102,20 +116,13 @@ func atom(token string) Expression {
 
 func readFromTokens(tokens *[]string) (Expression, error) {
 	if len(*tokens) == 0 {
-		return nil, errors.New("unexpected EOF")
+		return nil, errors.New("unexpected end of input")
 	}
 	token := pop(tokens)
 	switch token {
-	case "'":
-		// '... => (quote ...)
-		quoted, err := readFromTokens(tokens)
-		if err != nil {
-			return nil, err
-		}
-		return List{atom("quote"), quoted}, nil
 	case "(":
 		if len(*tokens) == 0 {
-			return nil, errors.New("unexpected EOF")
+			return nil, errors.New("unexpected end of input; missing `)`?")
 		}
 		list := List{}
 		for (*tokens)[0] != ")" {
@@ -125,21 +132,14 @@ func readFromTokens(tokens *[]string) (Expression, error) {
 			}
 			list = append(list, expr)
 			if len(*tokens) == 0 {
-				return nil, errors.New("unexpected EOF")
+				return nil, errors.New("unexpected end of input; missing `)`?")
 			}
 		}
 		pop(tokens)
 
-		if len(list) > 0 && list[0] == Symbol("define") {
-			// (define (f ...) (...)) => (define f (lambda (...) (...)))
-			if argsList, ok := list[1].(List); ok {
-				return List{atom("define"), argsList[0], List{atom("lambda"), argsList[1:], list[2]}}, nil
-			}
-		}
-
 		return list, nil
 	case ")":
-		return nil, errors.New("unexpected ')'")
+		return nil, errors.New("unexpected `)`")
 	default:
 		return atom(token), nil
 	}
