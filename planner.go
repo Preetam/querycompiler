@@ -55,7 +55,7 @@ func (n *SymbolNode) Evaluate(env *Environment) *Row {
 		return nil
 	}
 	return &Row{Values: map[string]Expression{
-		"_": sym,
+		n.Symbol: sym,
 	}}
 }
 
@@ -123,17 +123,20 @@ func (n *ScanNode) Evaluate(env *Environment) *Row {
 	r := &Row{
 		Values: map[string]Expression{},
 	}
+	newEnv := NewEnvironment(env)
 	if n.Source != nil {
-		r = n.Source.Evaluate(env)
+		sourceRow := n.Source.Evaluate(env)
 
-		for key, val := range r.Values {
-			env.Set(key, val)
+		if sourceRow != nil {
+			for key, val := range sourceRow.Values {
+				newEnv.Set(key, val)
+			}
 		}
 	}
 
 	for _, col := range n.Columns {
-		newEnv := NewEnvironment(env)
-		columnResult := col.Evaluate(newEnv)
+		colEnv := NewEnvironment(newEnv)
+		columnResult := col.Evaluate(colEnv)
 		if columnResult == nil {
 			continue
 		}
