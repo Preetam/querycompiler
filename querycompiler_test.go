@@ -42,9 +42,10 @@ func TestPlan(t *testing.T) {
 	checkQuery(`(select (columns id name) (table users))`)
 	checkQuery(`(select (columns (select (columns id) (table users)) name) (table users))`)
 	checkQuery(`(select (columns id name) (table (select (columns id) (table users))))`)
+	checkQuery(`(select (columns id) (table users) (where (= name "bob") ) )`)
+	checkQuery(`(select (columns id) (table users) (where (= name (select (columns "bob"))) ) )`)
 
 	// TODO
-	//checkQuery(`(select (columns name) (table users) (where (= users.id 1) ) )`)
 	//checkQuery(`(select (columns (count 1)) (table users) (group users.name (select (columns 1)))))`)
 	//checkQuery(`(select (columns 1 name) (table users) (group name) (where (= (select (columns 1)) 1)))`)
 	//checkQuery(`(select (columns name) (table users) (where (= id 1) ) )`)

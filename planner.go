@@ -25,6 +25,13 @@ type Row struct {
 	Values map[string]Expression
 }
 
+func (r *Row) SingleValue() Expression {
+	for _, v := range r.Values {
+		return v
+	}
+	return nil
+}
+
 // ConstNode represents a constant.
 type ConstNode struct {
 	Value Expression
@@ -70,6 +77,7 @@ func (n *SymbolNode) string(prefix string) string {
 // TableNode represents a table read.
 type TableNode struct {
 	TableName string
+	rowsRead  int
 }
 
 func (n *TableNode) Evaluate(env *Environment) *Row {
@@ -77,7 +85,11 @@ func (n *TableNode) Evaluate(env *Environment) *Row {
 	if table == nil {
 		return nil
 	}
-	return &table[0]
+	if n.rowsRead+1 > len(table) {
+		return nil
+	}
+	n.rowsRead++
+	return &table[n.rowsRead-1]
 }
 
 func (n *TableNode) String() string {
@@ -123,26 +135,47 @@ func (n *ScanNode) Evaluate(env *Environment) *Row {
 	r := &Row{
 		Values: map[string]Expression{},
 	}
-	newEnv := NewEnvironment(env)
-	if n.Source != nil {
-		sourceRow := n.Source.Evaluate(env)
 
-		if sourceRow != nil {
+ROW_LOOP:
+	for {
+		newEnv := NewEnvironment(env)
+		if n.Source != nil {
+			sourceRow := n.Source.Evaluate(env)
+
+			if sourceRow == nil {
+				return nil
+			}
+
 			for key, val := range sourceRow.Values {
 				newEnv.Set(key, val)
 			}
 		}
-	}
 
-	for _, col := range n.Columns {
-		colEnv := NewEnvironment(newEnv)
-		columnResult := col.Evaluate(colEnv)
-		if columnResult == nil {
-			continue
+		for _, filter := range n.Filters {
+			filterEnv := NewEnvironment(newEnv)
+			switch filter.Operator {
+			case "=":
+				args := []*Row{}
+				for _, arg := range filter.Arguments {
+					args = append(args, arg.Evaluate(filterEnv))
+				}
+				if args[0].SingleValue() != args[1].SingleValue() {
+					continue ROW_LOOP
+				}
+			}
 		}
-		for key, val := range columnResult.Values {
-			r.Values[key] = val
+
+		for _, col := range n.Columns {
+			colEnv := NewEnvironment(newEnv)
+			columnResult := col.Evaluate(colEnv)
+			if columnResult == nil {
+				continue
+			}
+			for key, val := range columnResult.Values {
+				r.Values[key] = val
+			}
 		}
+		break
 	}
 
 	return r
